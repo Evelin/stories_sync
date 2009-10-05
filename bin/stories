@@ -1,0 +1,9 @@
+#! /usr/bin/env ruby -rubygems
+
+require File.join(File.dirname(__FILE__), "..", "lib", "stories_sync.rb")
+
+if File.exists?("Thorfile")
+  load("Thorfile")
+end
+
+Stories.start
