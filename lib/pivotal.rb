@@ -1,5 +1,9 @@
 CONFIG_FILE = File.join("#{Dir.pwd}", "config", "pivotal.yml")
-PIVOTAL_CONFIG = YAML.load_file(CONFIG_FILE) if File.exists?(CONFIG_FILE)
+
+# Failsafe in case there's no config file
+raise "You don't have a configuration file yet, try running 'stories setup'" unless File.exists?(CONFIG_FILE)
+
+PIVOTAL_CONFIG = YAML.load_file(CONFIG_FILE)
 
 # Interaction with Pivotal
 class Iteration < ActiveResource::Base

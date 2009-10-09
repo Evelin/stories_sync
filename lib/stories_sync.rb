@@ -15,26 +15,38 @@ class Stories < Thor
 
   desc "add_pending_stories", "Fetch stories and add them to the stories file"
   def add_pending_stories
-    say_status(:fetch, "Fetching stories from Pivotal")
-    new_stories = fetch_stories - local_stories
-    say_status(:compare, "There are #{new_stories.size} new stories in Pivotal")
+    say_status(:fetch, "Fetching stories from Pivotal.")
+    new_external_stories = difference(fetch_stories, local_stories)
 
-    return if new_stories.empty?
-    add_new_stories(new_stories, stories_file)
-    say_status(:append, "Pending stories added successfully.")
+    if new_external_stories.empty?
+      say_status(:complete, "Pivotal stories up to date.")
+    else
+      new_external_stories.each_pair do |label, stories|
+        say_status(:compare, "There are #{stories.size} new stories in Pivotal with the label '#{label}'.")
+      end
+      add_new_stories(new_external_stories)
+    end
   end
 
   desc "upload_new_stories", "Upload new stories to pivotal"
   def upload_new_stories
-    new_stories = local_stories - fetch_stories
-    say_status(:compare, "You have #{new_stories.size} new local stories")
+    new_local_stories = difference(local_stories, fetch_stories)
 
-    return if new_stories.empty?
-    new_stories.each do |name|
-      upload_new_story(name)
-      say_status(:append, "Added story: '#{name}'")
+    new_local_stories.each_pair do |label, stories|
+      say_status(:compare, "You have #{stories.size} new local stories in #{label}_test.rb.")
     end
-    say_status(:completed, "Stories added to Pivotal successfully.")
+
+    if new_local_stories.empty?
+      say_status(:completed, "Your stories up to date.")
+    else
+      new_local_stories.each_pair do |label, stories|
+        stories.each do |story|
+          upload_new_story(story, label)
+          say_status(:append, "Added story: '#{story}'")
+        end
+      end
+      say_status(:completed, "Stories added to Pivotal successfully.")
+    end
   end
 
   desc "sync", "Synchronize your local stories with your Pivotal stories"
@@ -56,9 +68,21 @@ class Stories < Thor
   end
 
 private
+  def difference(hash_a ,hash_b)
+    new_stories = {}
+    hash_a.each_pair do |label, stories|
+      new_stories[label] = stories - hash_b[label].to_a
+    end
+    new_stories
+  end
 
+  # Returns {"label_1" => [story_1, story_2, ..], "label_2" => [story_1, story_2, ..]}
   def fetch_stories
-    Iteration.find(:last).stories.map(&:name)
+    Iteration.find(:last).stories.inject({}) do |result, story|
+      result[story.labels] ||= []
+      result[story.labels] << story.name
+      result
+    end
     rescue NoMethodError; []
   end
 
@@ -68,7 +92,7 @@ private
                                      :password => pass).get
     token.match(/<guid>(.*)<.guid>/)[1]
   rescue RestClient::Unauthorized
-    say_status :unauthorized, "Your credentials are invalid, You'll have to try again"
+    say_status :unauthorized, "Your credentials are invalid, You'll have to try again", :red
   end
 
   def create_config_file
@@ -77,11 +101,10 @@ private
     pass = ask "What is your password?"
     say_status :fetch, "Fetching your Pivotal token"
     token = fetch_token(user, pass)
-
+    return if token.nil?
     project_id = ask "What is your pivotal project id?"
-
     create_yaml(user, pass, token, project_id)
-    say_status :create, "./config/pivotal.yaml"
+    say_status :create, "./config/pivotal.yml"
   end
 
   def user_config
@@ -90,41 +113,55 @@ private
 
   # TODO we should consider making this a public method
   # and merging the extra options if given.
-  def upload_new_story(name)
+  def upload_new_story(name, key)
     # Other options are: requested_by, description, owned_by, labels
-    story = Story.create(:name => name, :estimate => 1)
-    move_to_backlog(story.id)
-  end
-
-  def move_to_backlog(story_id)
-    story = Story.find(story_id)
+    story = Story.create(:name => name, :estimate => 1, :labels => key)
     story.current_state = "unstarted"
     story.save
   end
 
-  # TODO instead of this method we should use stories_root.
-  # Then we could have a stories file per label.
-  def stories_file
-    File.join(File.dirname(__FILE__), "..", "test", "stories", "stories.rb")
+  def story_file(label)
+    File.join("#{Dir.pwd}", "test", "stories", "#{label}_test.rb")
   end
 
-  # TODO we should extend this method to support multiple stories files.
-  # Each file could be the name of a pivotal label, to make things easier.
-  # e.g: local_stories[:admins] #=> [story1, story2, etc...]
-  #      local_stories[:users]  #=> [storya, storyb, etc...]
-  def local_stories
-    File.read(stories_file).scan(/\n\s*story[\s\n]*(?:"([^"]*)"|'([^']*)')/m).map(&:compact).flatten
-  end
-
-  def add_new_stories(new_stories, file = stories_file)
-    original_file = File.read(file).scan(/(.*)end/m)
-    original_file << "\n  # Pending stories\n"
-
-    File.open(stories_file, "w") do |f|
-      f.puts original_file
-      f.puts new_stories.map {|story| "  story \"#{story}\""}.join("\n")
-      f.puts "end"
+  def files
+    Dir.entries(File.join("#{Dir.pwd}", "test", "stories")).delete_if do |name|
+      name.match(/_test.rb/).nil?
     end
+  end
+
+  def labels
+    files.inject([]) do |labels, name|
+      labels << name.scan(/(.*)_test.rb/).to_s
+      labels
+    end
+  end
+
+  def local_stories
+    labels.inject({}) do |result, label|
+      result[label] ||= []
+      result[label] = File.read(story_file(label)).scan(/\n\s*story[\s\n]*(?:"([^"]*)"|'([^']*)')/m).map(&:compact).flatten
+      result
+    end
+  end
+
+  def add_new_stories(new_stories)
+    new_stories.each_pair do |label, stories|
+      file = story_file(label)
+      if File.exists?(file)
+        original_file = File.read(file).scan(/(.*)end/m)
+        original_file << "\n  # Pending stories\n"
+
+        File.open(story_file(label), "w") do |f|
+          f.puts original_file
+          f.puts stories.map {|story| "  story \"#{story}\""}.join("\n")
+          f.puts "end"
+        end
+      else
+        say_status(:warning, "The file '#{file}' doesn't exist", :yellow)
+      end
+    end
+    say_status(:append, "Pending stories added successfully.")
   end
 
   def create_yaml(user, pass, token, project_id)
