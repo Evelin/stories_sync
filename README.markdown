@@ -38,7 +38,6 @@ This gem requires you to have a pivotal.yml in your config directory, but this c
     $ stories setup
 
 This will ask you for your pivotal username and password, then it will fetch your api token and create a config file for you.
-After that you are all set. You just need to have a stories file in /test/stories/stories.rb.
 
 Usage example
 -------------
