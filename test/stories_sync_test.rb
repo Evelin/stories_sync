@@ -17,7 +17,7 @@ class StorySyncTest < Test::Unit::TestCase
       spawn_story("3", "label_2")
     end
 
-    should "Synchronize multi-files with Pivotal" do
+    should "Synchronize multiple files with Pivotal" do
       execute_at_root("sync")
 
       stories = Story.find(:all).inject({}) do |result, story|

@@ -37,7 +37,7 @@ class Stories < Thor
     end
 
     if new_local_stories.empty?
-      say_status(:completed, "Your stories up to date.")
+      say_status(:complete, "Local stories up to date.")
     else
       new_local_stories.each_pair do |label, stories|
         stories.each do |story|
@@ -71,7 +71,8 @@ private
   def difference(hash_a ,hash_b)
     new_stories = {}
     hash_a.each_pair do |label, stories|
-      new_stories[label] = stories - hash_b[label].to_a
+      new_label_stories  = stories - hash_b[label].to_a
+      new_stories[label] = new_label_stories unless new_label_stories.empty?
     end
     new_stories
   end
@@ -79,11 +80,11 @@ private
   # Returns {"label_1" => [story_1, story_2, ..], "label_2" => [story_1, story_2, ..]}
   def fetch_stories
     Iteration.find(:last).stories.inject({}) do |result, story|
-      result[story.labels] ||= []
-      result[story.labels] << story.name
+      result[story.label] ||= []
+      result[story.label] << story.name
       result
     end
-    rescue NoMethodError; []
+    rescue NoMethodError; {}
   end
 
   def fetch_token(user = PIVOTAL_CONFIG[:user][:name], pass = PIVOTAL_CONFIG[:user][:pass])
@@ -147,12 +148,13 @@ private
 
   def add_new_stories(new_stories)
     new_stories.each_pair do |label, stories|
+
       file = story_file(label)
       if File.exists?(file)
         original_file = File.read(file).scan(/(.*)end/m)
         original_file << "\n  # Pending stories\n"
 
-        File.open(story_file(label), "w") do |f|
+        File.open(file, "w") do |f|
           f.puts original_file
           f.puts stories.map {|story| "  story \"#{story}\""}.join("\n")
           f.puts "end"
